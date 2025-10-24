@@ -4,6 +4,7 @@ import com.example.webrtcapp.utils.addRtcIceCandidate
 import com.example.webrtcapp.utils.createValue
 import com.example.webrtcapp.utils.setValue
 import com.example.webrtcapp.utils.stringify
+import io.getstream.log.taggedLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -35,6 +36,7 @@ class StreamPeerConnection(
     private val onVideoTrack: ((RtpTransceiver?) -> Unit)?
 ): PeerConnection.Observer {
     private val typeTag=type.stringify()
+    private val logger by taggedLogger("Call:PeerConnection")
     lateinit var connection: PeerConnection
         private set
     private var statsJob: Job?=null
@@ -42,19 +44,27 @@ class StreamPeerConnection(
     private val pendingIceCandidates = mutableListOf<IceCandidate>()
     private val statsFlow: MutableStateFlow<RTCStatsReport?> = MutableStateFlow(null)
 
+    init {
+        logger.i { "<init> #sfu; #$typeTag; mediaConstraints: $mediaConstraints" }
+    }
+
     fun initialize(peerConnection: PeerConnection){
+        logger.d { "[initialize] #sfu; #$typeTag; peerConnection: $peerConnection" }
         this.connection=peerConnection
     }
 
     suspend fun createOffer(): Result<SessionDescription>{
+        logger.d { "[createOffer] #sfu; #$typeTag; no args" }
         return createValue{connection.createOffer(it, mediaConstraints)}
     }
 
     suspend fun createAnswer(): Result<SessionDescription> {
+        logger.d { "[createAnswer] #sfu; #$typeTag; no args" }
         return createValue { connection.createAnswer(it, mediaConstraints) }
     }
 
     suspend fun setRemoteDescription(sessionDescription: SessionDescription): Result<Unit> {
+        logger.d { "[setRemoteDescription] #sfu; #$typeTag; answerSdp: ${sessionDescription.stringify()}" }
         return setValue {
             connection.setRemoteDescription(
                 it,
@@ -66,6 +76,7 @@ class StreamPeerConnection(
         }.also {
             pendingIceMutex.withLock {
                 pendingIceCandidates.forEach { iceCandidate ->
+                    logger.i { "[setRemoteDescription] #sfu; #subscriber; pendingRtcIceCandidate: $iceCandidate" }
                     connection.addRtcIceCandidate(iceCandidate)
                 }
                 pendingIceCandidates.clear()
@@ -78,34 +89,43 @@ class StreamPeerConnection(
             sessionDescription.type,
             sessionDescription.description.mungeCodecs()
         )
+        logger.d { "[setLocalDescription] #sfu; #$typeTag; offerSdp: ${sessionDescription.stringify()}" }
         return setValue { connection.setLocalDescription(it, sdp) }
     }
 
     suspend fun addIceCandidate(iceCandidate: IceCandidate): Result<Unit> {
         if (connection.remoteDescription == null) {
+            logger.w { "[addIceCandidate] #sfu; #$typeTag; postponed (no remoteDescription): $iceCandidate" }
             pendingIceMutex.withLock {
                 pendingIceCandidates.add(iceCandidate)
             }
             return Result.failure(RuntimeException("RemoteDescription is not set"))
         }
-        return connection.addRtcIceCandidate(iceCandidate)
+        logger.d { "[addIceCandidate] #sfu; #$typeTag; rtcIceCandidate: $iceCandidate" }
+        return connection.addRtcIceCandidate(iceCandidate).also {
+            logger.v { "[addIceCandidate] #sfu; #$typeTag; completed: $it" }
+        }
     }
 
     override fun onIceCandidate(candidate: IceCandidate?) {
+        logger.i { "[onIceCandidate] #sfu; #$typeTag; candidate: $candidate" }
         if (candidate == null) return
-
         onIceCandidate?.invoke(candidate, type)
     }
 
     override fun onAddStream(stream: MediaStream?) {
+        logger.i { "[onAddStream] #sfu; #$typeTag; stream: $stream" }
         if (stream != null) {
             onStreamAdded?.invoke(stream)
         }
     }
 
     override fun onAddTrack(receiver: RtpReceiver?, mediaStreams: Array<out MediaStream>?) {
+        logger.i { "[onAddTrack] #sfu; #$typeTag; receiver: $receiver, mediaStreams: $mediaStreams" }
         mediaStreams?.forEach { mediaStream ->
+            logger.v { "[onAddTrack] #sfu; #$typeTag; mediaStream: $mediaStream" }
             mediaStream.audioTracks?.forEach { remoteAudioTrack ->
+                logger.v { "[onAddTrack] #sfu; #$typeTag; remoteAudioTrack: ${remoteAudioTrack.stringify()}" }
                 remoteAudioTrack.setEnabled(true)
             }
             onStreamAdded?.invoke(mediaStream)
@@ -113,10 +133,12 @@ class StreamPeerConnection(
     }
 
     override fun onRenegotiationNeeded() {
+        logger.i { "[onRenegotiationNeeded] #sfu; #$typeTag; no args" }
         onNegotiationNeeded?.invoke(this, type)
     }
 
     override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState?) {
+        logger.i { "[onIceConnectionChange] #sfu; #$typeTag; newState: $newState" }
         when (newState) {
             PeerConnection.IceConnectionState.CLOSED,
             PeerConnection.IceConnectionState.FAILED,
@@ -127,30 +149,43 @@ class StreamPeerConnection(
     }
 
     override fun onTrack(transceiver: RtpTransceiver?) {
+        logger.i { "[onTrack] #sfu; #$typeTag; transceiver: $transceiver" }
         onVideoTrack?.invoke(transceiver)
     }
 
-    override fun onRemoveTrack(receiver: RtpReceiver?) {}
+    override fun onRemoveTrack(receiver: RtpReceiver?) {
+        logger.i { "[onRemoveTrack] #sfu; #$typeTag; receiver: $receiver" }
+    }
 
-    override fun onSignalingChange(newState: PeerConnection.SignalingState?) {}
+    override fun onSignalingChange(newState: PeerConnection.SignalingState?) {
+        logger.d { "[onSignalingChange] #sfu; #$typeTag; newState: $newState" }
+    }
 
-    override fun onIceConnectionReceivingChange(receiving: Boolean) {}
+    override fun onIceConnectionReceivingChange(receiving: Boolean) {
+        logger.i { "[onIceConnectionReceivingChange] #sfu; #$typeTag; receiving: $receiving" }
+    }
 
-    override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState?) {}
+    override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState?) {
+        logger.i { "[onIceGatheringChange] #sfu; #$typeTag; newState: $newState" }
+    }
 
-    override fun onIceCandidateError(event: IceCandidateErrorEvent?) {}
+    override fun onIceCandidateError(event: IceCandidateErrorEvent?) {
+        logger.e { "[onIceCandidateError] #sfu; #$typeTag; event: ${event?.stringify()}" }
+    }
 
-    override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {}
+    override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
+        logger.i { "[onConnectionChange] #sfu; #$typeTag; newState: $newState" }
+    }
 
-    override fun onSelectedCandidatePairChanged(event: CandidatePairChangeEvent?) {}
+    override fun onSelectedCandidatePairChanged(event: CandidatePairChangeEvent?) {
+        logger.i { "[onSelectedCandidatePairChanged] #sfu; #$typeTag; event: $event" }
+    }
 
     override fun onIceCandidatesRemoved(p0: Array<out IceCandidate?>?) {
-        TODO("Not yet implemented")
+        logger.i { "[onIceCandidatesRemoved] #sfu; #$typeTag; iceCandidates: $p0" }
     }
 
-    override fun onRemoveStream(p0: MediaStream?) {
-        TODO("Not yet implemented")
-    }
+    override fun onRemoveStream(p0: MediaStream?) {}
 
     override fun onDataChannel(channel: DataChannel?): Unit = Unit
 
@@ -169,6 +204,7 @@ class StreamPeerConnection(
         while (isActive) {
             delay(10_000L)
             connection.getStats {
+                logger.v { "[observeStats] #sfu; #$typeTag; stats: $it" }
                 statsFlow.value = it
             }
         }

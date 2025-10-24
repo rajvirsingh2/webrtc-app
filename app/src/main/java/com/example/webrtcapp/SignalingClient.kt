@@ -1,6 +1,8 @@
 package com.example.webrtcapp
 
 import android.util.Log
+import com.example.webrtcapp.BuildConfig
+import io.getstream.log.taggedLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -17,10 +19,10 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 
 class SignalingClient {
-    private val signalIp = "wss://test.antmedia.io:5443/live/websocket"
-    private val signalingScope = CoroutineScope(SupervisorJob()+ Dispatchers.IO)
+    private val logger by taggedLogger("Call:SignalingClient")
+    private val signalingScope = CoroutineScope(SupervisorJob()+ Dispatchers.Default)
     private val client = OkHttpClient()
-    private val request = Request.Builder().url(signalIp).build()
+    private val request = Request.Builder().url(BuildConfig.SIGNALING_SERVER_IP_ADDRESS).build()
     private val ws = client.newWebSocket(request, SignalingWebSocketListener())
 
     private val _sessionStateFlow = MutableStateFlow(WebRTCSessionState.Offline)
@@ -30,14 +32,11 @@ class SignalingClient {
     val signalingCommandFlow: SharedFlow<Pair<SignalingCommand, String>> = _signalingCommandFlow
 
     fun sendCommand(signalingCommand: SignalingCommand, message: String){
+        logger.d{"[send command] $signalingCommand $message]"}
         ws.send("$signalingCommand $message")
     }
 
     private inner class SignalingWebSocketListener: WebSocketListener(){
-        override fun onOpen(webSocket: WebSocket, response: Response) {
-            Log.d("SignalingClient", "WebSocket connected successfully")
-            _sessionStateFlow.value = WebRTCSessionState.Ready
-        }
         override fun onMessage(webSocket: WebSocket, text: String) {
             when{
                 text.startsWith(SignalingCommand.STATE.toString(), true) ->
@@ -59,6 +58,7 @@ class SignalingClient {
 
     private fun handleSignalingCommand(command: SignalingCommand, text: String) {
         val value = getSeparatedMessage(text)
+        logger.d { "received signaling: $command $value" }
         signalingScope.launch {
             _signalingCommandFlow.emit(command to value)
         }

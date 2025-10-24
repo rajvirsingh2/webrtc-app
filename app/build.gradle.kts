@@ -1,14 +1,23 @@
+@file:Suppress("DEPRECATION")
+
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localProperties.load(FileInputStream(localPropertiesFile))
+}
+
 android {
     namespace = "com.example.webrtcapp"
-    compileSdk {
-        version = release(36)
-    }
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.webrtcapp"
@@ -18,6 +27,11 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField(
+            "String",
+            "SIGNALING_SERVER_IP_ADDRESS",
+            localProperties["SIGNALING_SERVER_IP_ADDRESS"].toString()
+        )
     }
 
     buildTypes {
@@ -29,6 +43,11 @@ android {
             )
         }
     }
+    packagingOptions {
+        resources {
+            excludes.add("/META-INF/{AL2.0,LGPL2.1}")
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
@@ -38,6 +57,11 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+
+    lint{
+        abortOnError=false
     }
 }
 
@@ -62,4 +86,5 @@ dependencies {
     implementation(platform(libs.okhttp.bom))
     implementation(libs.okhttp3.okhttp)
     implementation(libs.logging.interceptor)
+    implementation(libs.stream.log)
 }

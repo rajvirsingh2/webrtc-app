@@ -1,6 +1,5 @@
 package com.example.webrtcapp.ui.screens.stage
 
-import android.widget.Button
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Button
@@ -32,7 +31,7 @@ fun StageScreen(
             }
             WebRTCSessionState.Offline -> {
                 enabledCall = false
-                stringResource(R.string.session_offline)
+                stringResource(R.string.button_start_session)
             }
             WebRTCSessionState.Active -> {
                 enabledCall = false

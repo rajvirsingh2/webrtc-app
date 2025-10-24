@@ -3,6 +3,7 @@ package com.example.webrtcapp.audio
 import android.bluetooth.BluetoothHeadset
 import android.content.Context
 import android.media.AudioManager
+import io.getstream.log.taggedLogger
 
 @Suppress("CAST_NEVER_SUCCEEDS")
 class AudioSwitch internal constructor(
@@ -15,6 +16,7 @@ class AudioSwitch internal constructor(
         audioFocusChangeListener = audioFocusChangeListener
     )
 ) {
+    private val logger by taggedLogger("Call:AudioSwitch")
     private var audioDeviceChangeListener: AudioDeviceChangeListener? = null
     private var selectedDevice: AudioDevice? = null
     private var userSelectedDevice: AudioDevice? = null
@@ -56,7 +58,14 @@ class AudioSwitch internal constructor(
 
     private fun userSelectedDevicePresent(audioDevices: List<AudioDevice>) =
         userSelectedDevice?.let { selectedDevice ->
-            audioDevices.contains(selectedDevice)
+            if (selectedDevice is BluetoothHeadset) {
+                audioDevices.find { it is BluetoothHeadset }?.let { newHeadset ->
+                    userSelectedDevice = newHeadset
+                    true
+                } ?: false
+            } else {
+                audioDevices.contains(selectedDevice)
+            }
         } ?: false
 
     private fun closeListeners() {
@@ -65,6 +74,7 @@ class AudioSwitch internal constructor(
     }
 
     fun start(listener: AudioDeviceChangeListener) {
+        logger.d { "[start] state: $state" }
         audioDeviceChangeListener = listener
         when (state) {
             State.STOPPED -> {
@@ -77,6 +87,7 @@ class AudioSwitch internal constructor(
     }
 
     fun stop() {
+        logger.d { "[stop] state: $state" }
         when (state) {
             State.ACTIVATED -> {
                 deactivate()
@@ -91,11 +102,10 @@ class AudioSwitch internal constructor(
     }
 
     fun activate() {
+        logger.d { "[activate] state: $state" }
         when (state) {
             State.STARTED -> {
                 audioManager.cacheAudioState()
-
-                // Always set mute to false for WebRTC
                 audioManager.mute(false)
                 audioManager.setAudioFocus()
                 selectedDevice?.let { activate(it) }
@@ -107,9 +117,9 @@ class AudioSwitch internal constructor(
     }
 
     private fun deactivate() {
+        logger.d { "[deactivate] state: $state" }
         when (state) {
             State.ACTIVATED -> {
-                // Restore stored audio state
                 audioManager.restoreAudioState()
                 state = State.STARTED
             }
@@ -119,31 +129,30 @@ class AudioSwitch internal constructor(
     }
 
     private fun selectDevice(audioDevice: AudioDevice?) {
+        logger.d { "[selectDevice] audioDevice: $audioDevice" }
         if (selectedDevice != audioDevice) {
             userSelectedDevice = audioDevice
             enumerateDevices()
         }
     }
     private fun activate(audioDevice: AudioDevice) {
+        logger.d { "[activate] audioDevice: $audioDevice" }
         when (audioDevice) {
-            is BluetoothHeadset -> audioManager.enableSpeakerphone(false)
             is AudioDevice.Earpiece, is AudioDevice.WiredHeadset -> audioManager.enableSpeakerphone(false)
             is AudioDevice.Speakerphone -> audioManager.enableSpeakerphone(true)
-            is AudioDevice.BluetoothHeadset -> TODO()
+            is AudioDevice.BluetoothHeadset -> audioManager.enableSpeakerphone(false)
         }
     }
 
     private fun enumerateDevices(bluetoothHeadsetName: String? = null) {
-        // save off the old state and 'semi'-deep copy the list of audio devices
+        logger.d { "[enumerateDevices] bluetoothHeadsetName: $bluetoothHeadsetName" }
         val oldAudioDeviceState = AudioDeviceState(mutableAudioDevices.map { it }, selectedDevice)
-        // update audio device list and selected device
         addAvailableAudioDevices(bluetoothHeadsetName)
 
         if (!userSelectedDevicePresent(mutableAudioDevices)) {
             userSelectedDevice = null
         }
 
-        // Select the audio device
         selectedDevice = if (userSelectedDevice != null) {
             userSelectedDevice
         } else if (mutableAudioDevices.size > 0) {
@@ -151,12 +160,11 @@ class AudioSwitch internal constructor(
         } else {
             null
         }
+        logger.v { "[enumerateDevices] selectedDevice: $selectedDevice" }
 
-        // Activate the device if in the active state
         if (state == State.ACTIVATED) {
             activate()
         }
-        // trigger audio device change listener if there has been a change
         val newAudioDeviceState = AudioDeviceState(mutableAudioDevices, selectedDevice)
         if (newAudioDeviceState != oldAudioDeviceState) {
             audioDeviceChangeListener?.invoke(mutableAudioDevices, selectedDevice)
@@ -164,24 +172,36 @@ class AudioSwitch internal constructor(
     }
 
     private fun addAvailableAudioDevices(bluetoothHeadsetName: String?) {
+        logger.d {
+            "[addAvailableAudioDevices] wiredHeadsetAvailable: $wiredHeadsetAvailable, " +
+                    "bluetoothHeadsetName: $bluetoothHeadsetName"
+        }
         mutableAudioDevices.clear()
         preferredDeviceList.forEach { audioDevice ->
             when (audioDevice) {
                 BluetoothHeadset::class.java -> {
                 }
                 AudioDevice.WiredHeadset::class.java -> {
+                    logger.v {
+                        "[addAvailableAudioDevices] #WiredHeadset; wiredHeadsetAvailable: $wiredHeadsetAvailable"
+                    }
                     if (wiredHeadsetAvailable) {
                         mutableAudioDevices.add(AudioDevice.WiredHeadset())
                     }
                 }
                 AudioDevice.Earpiece::class.java -> {
                     val hasEarpiece = audioManager.hasEarpiece()
+                    logger.v {
+                        "[addAvailableAudioDevices] #Earpiece; hasEarpiece: $hasEarpiece, " +
+                                "wiredHeadsetAvailable: $wiredHeadsetAvailable"
+                    }
                     if (hasEarpiece && !wiredHeadsetAvailable) {
                         mutableAudioDevices.add(AudioDevice.Earpiece())
                     }
                 }
                 AudioDevice.Speakerphone::class.java -> {
                     val hasSpeakerphone = audioManager.hasSpeakerphone()
+                    logger.v { "[addAvailableAudioDevices] #Speakerphone; hasSpeakerphone: $hasSpeakerphone" }
                     if (hasSpeakerphone) {
                         mutableAudioDevices.add(AudioDevice.Speakerphone())
                     }

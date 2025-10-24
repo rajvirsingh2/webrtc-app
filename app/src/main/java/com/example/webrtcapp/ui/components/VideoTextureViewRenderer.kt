@@ -7,7 +7,6 @@ import android.os.Handler
 import android.os.Looper
 import android.util.AttributeSet
 import android.view.TextureView
-import androidx.compose.runtime.Composable
 import org.webrtc.EglBase
 import org.webrtc.EglRenderer
 import org.webrtc.GlRectDrawer
@@ -41,7 +40,7 @@ open class VideoTextureViewRenderer @JvmOverloads constructor(
 
     private fun getResourceName(): String{
         return try{
-            resources.getResourceEntryName(id)+":"
+            resources.getResourceEntryName(id)+": "
         }catch (e: Resources.NotFoundException){
             ""
         }

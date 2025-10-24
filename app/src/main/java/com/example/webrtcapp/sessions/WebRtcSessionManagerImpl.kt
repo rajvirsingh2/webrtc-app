@@ -18,6 +18,8 @@ import com.example.webrtcapp.audio.AudioSwitchHandler
 import com.example.webrtcapp.peer.StreamPeerConnection
 import com.example.webrtcapp.peer.StreamPeerConnectionFactory
 import com.example.webrtcapp.peer.StreamPeerType
+import com.example.webrtcapp.utils.stringify
+import io.getstream.log.taggedLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -45,6 +47,7 @@ class WebRtcSessionManagerImpl(
     override val peerConnectionFactory: StreamPeerConnectionFactory,
     override val signalClient: SignalingClient
 ): WebRtcSessionManager{
+    private val logger by taggedLogger("Call:LocalWebRtcSessionManager")
 
     private val sessionManagerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val _localVideoTrackFlow = MutableSharedFlow<VideoTrack>()
@@ -133,6 +136,15 @@ class WebRtcSessionManagerImpl(
                     SignalingCommand.ICE,
                     "${iceCandidate.sdpMid}$ICE_SEPARATOR${iceCandidate.sdpMLineIndex}$ICE_SEPARATOR${iceCandidate.sdp}"
                 )
+            },
+            onVideoTrack = { rtpTransceiver ->
+                val track=rtpTransceiver?.receiver?.track() ?: return@makePeerConnection
+                if(track.kind()== MediaStreamTrack.VIDEO_TRACK_KIND){
+                    val videoTrack=track as VideoTrack
+                    sessionManagerScope.launch {
+                        _remoteVideoTrackFlow.emit(videoTrack)
+                    }
+                }
             }
         )
     }
@@ -156,7 +168,6 @@ class WebRtcSessionManagerImpl(
         peerConnection.connection.addTrack(localVideoTrack)
         peerConnection.connection.addTrack(localAudioTrack)
         sessionManagerScope.launch {
-            // sending local video track to show local video from start
             _localVideoTrackFlow.emit(localVideoTrack)
 
             if (offer != null) {
@@ -191,6 +202,7 @@ class WebRtcSessionManagerImpl(
         localVideoTrackFlow.replayCache.forEach { videoTrack ->
             videoTrack.dispose()
         }
+        localAudioTrack.dispose()
         localVideoTrack.dispose()
 
         // dispose audio handler and video capturer.
@@ -219,13 +231,16 @@ class WebRtcSessionManagerImpl(
         result.onSuccess {
             signalClient.sendCommand(SignalingCommand.ANSWER, answer.description)
         }
+        logger.d { "[SDP] send answer: ${answer.stringify()}" }
     }
 
     private fun handleOffer(sdp: String) {
+        logger.d { "[SDP] handle offer: $sdp" }
         offer = sdp
     }
 
     private suspend fun handleAnswer(sdp: String) {
+        logger.d { "[SDP] handle answer: $sdp" }
         peerConnection.setRemoteDescription(
             SessionDescription(SessionDescription.Type.ANSWER, sdp)
         )
@@ -310,6 +325,7 @@ class WebRtcSessionManagerImpl(
             val device = devices.firstOrNull { it.type == deviceType } ?: return
 
             val isCommunicationDeviceSet = audioManager?.setCommunicationDevice(device)
+            logger.d { "[setupAudio] #sfu; isCommunicationDeviceSet: $isCommunicationDeviceSet" }
         }
     }
 }
